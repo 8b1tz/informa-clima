@@ -1,6 +1,12 @@
-from sqlalchemy import Column, Float, Integer, String
+from sqlalchemy import Column, Float, Integer, String, create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 
-from src.config.database import Base
+DATABASE_URL = "sqlite:///./test.db"
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
 
 class Location(Base):
@@ -12,7 +18,4 @@ class Location(Base):
     lon = Column(Float)
 
 
-class Subscriber(Base):
-    __tablename__ = "subscribers"
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True)
+Base.metadata.create_all(bind=engine)
