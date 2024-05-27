@@ -1,51 +1,52 @@
 import asyncio
 import os
+from typing import List, Optional, Tuple
 
 import aiohttp
 import pandas as pd
 from dotenv import load_dotenv
 
 
-def load_cities_csv():
-    df = pd.read_csv('data/worldcities.csv')
+def load_cities_csv() -> pd.DataFrame:
+    """Carrega o arquivo CSV contendo os dados das cidades do Rio Grande do Sul."""
+    df: pd.DataFrame = pd.read_csv('data/worldcities.csv')
     return df[df['admin_name'] == 'Rio Grande do Sul']
 
 
-def get_city_coordinates(city_name: str):
-    df = load_cities_csv()
-    city_row = df[df['city'].str.lower() == city_name.lower()]
+def get_city_coordinates(city_name: str) -> Tuple[Optional[float], Optional[float]]:
+    """Obtém as coordenadas (latitude e longitude) de uma cidade pelo nome."""
+    df: pd.DataFrame = load_cities_csv()
+    city_row: pd.Series = df[df['city'].str.lower() == city_name.lower()]
     if not city_row.empty:
         return city_row.iloc[0]['lat'], city_row.iloc[0]['lng']
     return None, None
 
 
-def get_cities_rio_grande_do_sul():
-    df = load_cities_csv()
+def get_cities_rio_grande_do_sul() -> List[dict]:
+    """Obtém uma lista de dicionários contendo os nomes e coordenadas das cidades do Rio Grande do Sul."""
+    df: pd.DataFrame = load_cities_csv()
     return [{"city": row['city'], "lat": row['lat'], "lon": row['lng']} for index, row in df.iterrows()]
 
 
-async def fetch_weather_data(session, lat: float, lon: float):
+async def fetch_weather_data(session: aiohttp.ClientSession, lat: float, lon: float) -> Optional[dict]:
+    """Busca dados meteorológicos de uma API com base na latitude e longitude."""
     load_dotenv()
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,precipitation,windspeed_10m,precipitation_probability,pressure_msl,direct_radiation&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=America/Sao_Paulo"
-    print(f"Fetching weather data from URL: {url}")
+    url: str = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,precipitation,windspeed_10m,precipitation_probability,pressure_msl,direct_radiation&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=America/Sao_Paulo"
     async with session.get(url) as response:
-        print(f"Response status: {response.status}")
         if response.status == 200:
-            data = await response.json()
+            data: dict = await response.json()
             return data
-        else:
-            print(f"Failed to fetch weather data: {response.status}")
-            text = await response.text()
-            print(f"Response text: {text}")
     return None
 
 
-async def get_weather_data(lat: float, lon: float):
+async def get_weather_data(lat: float, lon: float) -> Optional[dict]:
+    """Obtém dados meteorológicos com base na latitude e longitude."""
     async with aiohttp.ClientSession() as session:
         return await fetch_weather_data(session, lat, lon)
 
 
-def calculate_statistics(weather_data):
+def calculate_statistics(weather_data: dict) -> dict:
+    """Calcula estatísticas com base nos dados meteorológicos."""
     stats = {
         "precipitation_sum": 0,
         "temperature_min": float('inf'),
@@ -79,9 +80,11 @@ def calculate_statistics(weather_data):
         daily_precip = daily_data.get("precipitation_sum", [])
 
         if daily_temp_min:
-            stats["temperature_min"] = min(stats["temperature_min"], min(daily_temp_min))
+            stats["temperature_min"] = min(stats["temperature_min"],
+                                           min(daily_temp_min))
         if daily_temp_max:
-            stats["temperature_max"] = max(stats["temperature_max"], max(daily_temp_max))
+            stats["temperature_max"] = max(stats["temperature_max"],
+                                           max(daily_temp_max))
         if daily_precip:
             stats["precipitation_sum"] += sum(daily_precip)
 
@@ -91,11 +94,18 @@ def calculate_statistics(weather_data):
         stats["temperature_max"] = None
 
     if len(hourly_data['precipitation_probability']) > 0:
-        stats["precipitation_probability_avg"] /= len(hourly_data['precipitation_probability'])
+        stats["precipitation_probability_avg"] = round(
+            stats["precipitation_probability_avg"] /
+            len(hourly_data['precipitation_probability']), 2
+        )
     if len(hourly_data['pressure_msl']) > 0:
-        stats["pressure_avg"] /= len(hourly_data['pressure_msl'])
+        stats["pressure_avg"] = round(
+            stats["pressure_avg"] / len(hourly_data['pressure_msl']), 2
+        )
     if len(hourly_data['direct_radiation']) > 0:
-        stats["direct_radiation_avg"] /= len(hourly_data['direct_radiation'])
+        stats["direct_radiation_avg"] = round(
+            stats["direct_radiation_avg"] / len(hourly_data['direct_radiation']), 2
+        )
 
     stats["risk_level"] = assess_risk(stats)
 
@@ -103,7 +113,8 @@ def calculate_statistics(weather_data):
     return stats
 
 
-def assess_risk(stats):
+def assess_risk(stats: dict) -> Tuple[str, List[str]]:
+    """Avalia o nível de risco com base nas estatísticas meteorológicas."""
     reasons = []
     if stats["precipitation_sum"] >= 50:
         reasons.append("alta precipitação")
@@ -126,18 +137,21 @@ def assess_risk(stats):
     return risk_level, reasons
 
 
-
-async def get_statistics_for_all_cities():
+async def get_statistics_for_all_cities() -> List[dict]:
+    """Obtém estatísticas meteorológicas
+    para todas as cidades do Rio Grande do Sul."""
     cities = get_cities_rio_grande_do_sul()
     async with aiohttp.ClientSession() as session:
-        tasks = []
-        for city in cities:
-            task = asyncio.create_task(fetch_city_statistics(session, city))
-            tasks.append(task)
+        tasks = [asyncio.create_task(
+            fetch_city_statistics(session, city))
+                  for city in cities]
         return await asyncio.gather(*tasks)
 
 
-async def fetch_city_statistics(session, city):
+async def fetch_city_statistics(
+        session: aiohttp.ClientSession, city: dict
+        ) -> dict:
+    """Obtém as estatísticas meteorológicas de uma cidade."""
     lat, lon = city["lat"], city["lon"]
     weather_data = await fetch_weather_data(session, lat, lon)
     if weather_data:
@@ -151,19 +165,20 @@ async def fetch_city_statistics(session, city):
     return city
 
 
-def filter_cities(cities, criteria):
+def filter_cities(cities: List[dict], criteria: dict) -> List[dict]:
+    """Filtra as cidades com base nos critérios especificados."""
     filtered = []
     for city in cities:
         stats = city.get("stats", {})
-        if all(stats.get(k) is not None and stats.get(k) >= v for k, v in criteria.items()):
+        if all(
+            stats.get(k) is not None and stats.get(k) >= v
+            for k, v in criteria.items()
+        ):
             filtered.append(city)
     return filtered
 
 
-async def main():
+async def main() -> None:
+    """Executa a função principal de forma assíncrona."""
     cities_stats = await get_statistics_for_all_cities()
     print(cities_stats)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
