@@ -41,5 +41,5 @@ uvicorn src.main.py:app --reload
 ## Criado por:
 
 - Backend: Yohanna de Oliveira 
-- Frontend: Ana Júlia Lins [https://github.com/AnaLinsDev/womankers_rs](repositório)
+- Frontend: Ana Júlia Lins [repositório](https://github.com/AnaLinsDev/womankers_rs)
 
