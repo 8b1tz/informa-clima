@@ -1,5 +1,4 @@
 import asyncio
-import os
 from typing import List, Optional, Tuple
 
 import aiohttp
@@ -108,8 +107,6 @@ def calculate_statistics(weather_data: dict) -> dict:
         )
 
     stats["risk_level"] = assess_risk(stats)
-
-    print(f"Calculated stats: {stats}")
     return stats
 
 
@@ -181,4 +178,4 @@ def filter_cities(cities: List[dict], criteria: dict) -> List[dict]:
 async def main() -> None:
     """Executa a função principal de forma assíncrona."""
     cities_stats = await get_statistics_for_all_cities()
-    print(cities_stats)
+
