@@ -5,3 +5,4 @@ requests==2.26.0
 pandas==1.3.3
 aiohttp
 python-dotenv
+numpy==1.23.5
