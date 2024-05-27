@@ -17,7 +17,7 @@ async def get_locations_rs():
 
 @router.get("/locations/rs/filter", response_model=List[dict])
 async def filter_locations_rs(
-    status: Optional[str] = Query(None, description="Status to filter by: SEGURO, ATENÇÃO, PERIGO"),
+    status: Optional[str] = Query(None, description="Status to filter by: SEGURO and PERIGO"),
     city: Optional[str] = Query(None, description="City to filter by (optional)")
 ):
     cities = await get_statistics_for_all_cities()

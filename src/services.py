@@ -26,14 +26,12 @@ def get_cities_rio_grande_do_sul():
 
 async def fetch_weather_data(session, lat: float, lon: float):
     load_dotenv()
-    api_key = os.getenv("API_KEY")
-    url = f"https://my.meteoblue.com/packages/basic-1h_basic-day?apikey={api_key}&lat={lat}&lon={lon}&asl=0&format=json"
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,precipitation,windspeed_10m,precipitation_probability,pressure_msl,direct_radiation&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=America/Sao_Paulo"
     print(f"Fetching weather data from URL: {url}")
     async with session.get(url) as response:
         print(f"Response status: {response.status}")
         if response.status == 200:
             data = await response.json()
-            print(f"Weather data for lat={lat}, lon={lon}: {data}")
             return data
         else:
             print(f"Failed to fetch weather data: {response.status}")
@@ -49,47 +47,55 @@ async def get_weather_data(lat: float, lon: float):
 
 def calculate_statistics(weather_data):
     stats = {
-        "precipitation": 0,
+        "precipitation_sum": 0,
         "temperature_min": float('inf'),
         "temperature_max": float('-inf'),
         "wind_speed_max": 0,
-        "humidity_max": 0
+        "precipitation_probability_avg": 0,
+        "pressure_avg": 0,
+        "direct_radiation_avg": 0,
     }
 
-    data_hourly = weather_data.get("data_1h", {})
-    for entry in zip(data_hourly['temperature'], data_hourly['precipitation'], data_hourly['windspeed'], data_hourly['relativehumidity']):
-        temp, precip, wind_speed, humidity = entry
-        
+    hourly_data = weather_data.get("hourly", {})
+    for temp, precip, wind_speed, precipitation_probability, pressure, direct_radiation in zip(hourly_data['temperature_2m'], hourly_data['precipitation'], hourly_data['windspeed_10m'], hourly_data['precipitation_probability'], hourly_data['pressure_msl'], hourly_data['direct_radiation']):
         if temp is not None:
             stats["temperature_min"] = min(stats["temperature_min"], temp)
             stats["temperature_max"] = max(stats["temperature_max"], temp)
-
         if precip is not None:
-            stats["precipitation"] += precip
-
+            stats["precipitation_sum"] += precip
         if wind_speed is not None:
             stats["wind_speed_max"] = max(stats["wind_speed_max"], wind_speed)
+        if precipitation_probability is not None:
+            stats["precipitation_probability_avg"] += precipitation_probability
+        if pressure is not None:
+            stats["pressure_avg"] += pressure
+        if direct_radiation is not None:
+            stats["direct_radiation_avg"] += direct_radiation
 
-        if humidity is not None:
-            stats["humidity_max"] = max(stats["humidity_max"], humidity)
-
-    data_daily = weather_data.get("data_day", {})
-    if data_daily:
-        daily_temp_min = data_daily.get("temperature_min")
-        daily_temp_max = data_daily.get("temperature_max")
-        daily_precip = data_daily.get("precipitation")
+    daily_data = weather_data.get("daily", {})
+    if daily_data:
+        daily_temp_min = daily_data.get("temperature_2m_min", [])
+        daily_temp_max = daily_data.get("temperature_2m_max", [])
+        daily_precip = daily_data.get("precipitation_sum", [])
 
         if daily_temp_min:
             stats["temperature_min"] = min(stats["temperature_min"], min(daily_temp_min))
         if daily_temp_max:
             stats["temperature_max"] = max(stats["temperature_max"], max(daily_temp_max))
         if daily_precip:
-            stats["precipitation"] += sum(daily_precip)
+            stats["precipitation_sum"] += sum(daily_precip)
 
     if stats["temperature_min"] == float('inf'):
         stats["temperature_min"] = None
     if stats["temperature_max"] == float('-inf'):
         stats["temperature_max"] = None
+
+    if len(hourly_data['precipitation_probability']) > 0:
+        stats["precipitation_probability_avg"] /= len(hourly_data['precipitation_probability'])
+    if len(hourly_data['pressure_msl']) > 0:
+        stats["pressure_avg"] /= len(hourly_data['pressure_msl'])
+    if len(hourly_data['direct_radiation']) > 0:
+        stats["direct_radiation_avg"] /= len(hourly_data['direct_radiation'])
 
     stats["risk_level"] = assess_risk(stats)
 
@@ -99,35 +105,23 @@ def calculate_statistics(weather_data):
 
 def assess_risk(stats):
     reasons = []
-    if stats["precipitation"] > 50:
+    if stats["precipitation_sum"] >= 50:
         reasons.append("alta precipitação")
-    if stats["wind_speed_max"] > 20:
+    if stats["wind_speed_max"] >= 50:
         reasons.append("alta velocidade do vento")
-    if stats["temperature_max"] > 40:
+    if stats["temperature_max"] >= 40:
         reasons.append("temperatura máxima alta")
     if stats["temperature_min"] < -5:
         reasons.append("temperatura mínima baixa")
-    if stats["humidity_max"] > 90:
-        reasons.append("alta umidade")
+    if stats["pressure_avg"] <= 900:
+        reasons.append("baixa pressão atmosférica")
+    if stats["direct_radiation_avg"] >= 500:
+        reasons.append("alta radiação solar direta")
 
     if reasons:
         risk_level = "PERIGO"
     else:
-        if stats["precipitation"] > 20:
-            reasons.append("precipitação moderada")
-        if stats["wind_speed_max"] > 10:
-            reasons.append("velocidade do vento moderada")
-        if stats["temperature_max"] > 35:
-            reasons.append("temperatura máxima moderada")
-        if stats["temperature_min"] < 0:
-            reasons.append("temperatura mínima moderada")
-        if stats["humidity_max"] > 70:
-            reasons.append("umidade moderada")
-
-        if reasons:
-            risk_level = "ATENÇÃO"
-        else:
-            risk_level = "SEGURO"
+        risk_level = "SEGURO"
 
     return risk_level, reasons
 
@@ -157,7 +151,6 @@ async def fetch_city_statistics(session, city):
     return city
 
 
-
 def filter_cities(cities, criteria):
     filtered = []
     for city in cities:
@@ -165,3 +158,12 @@ def filter_cities(cities, criteria):
         if all(stats.get(k) is not None and stats.get(k) >= v for k, v in criteria.items()):
             filtered.append(city)
     return filtered
+
+
+async def main():
+    cities_stats = await get_statistics_for_all_cities()
+    print(cities_stats)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
