@@ -6,3 +6,4 @@ pandas
 aiohttp
 python-dotenv
 numpy
+fastapi-cors
