@@ -4,6 +4,102 @@ from typing import List, Optional, Tuple
 import aiohttp
 import pandas as pd
 from dotenv import load_dotenv
+from passlib.context import CryptContext
+from sqlalchemy.orm import Session
+
+from src import models, schemas
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def create_user(db: Session, user: schemas.UserCreate) -> models.User:
+    hashed_password = get_password_hash(user.password)
+    db_user = models.User(
+        username=user.username,
+        email=user.email,
+        hashed_password=hashed_password,
+        is_collector=user.is_collector,
+        is_admin=user.is_admin
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+def authenticate_user(db: Session, username: str, password: str) -> Optional[models.User]:
+    user = db.query(models.User).filter(models.User.username == username).first()
+    if not user:
+        return None
+    if not verify_password(password, user.hashed_password):
+        return None
+    return user
+
+
+def create_donation_location(db: Session, location: schemas.DonationLocationCreate, collector_id: int) -> models.DonationLocation:
+    db_location = models.DonationLocation(
+        name=location.name,
+        location=location.location,
+        hygiene=location.hygiene,
+        food=location.food,
+        clothes=location.clothes,
+        collector_id=collector_id
+    )
+    db.add(db_location)
+    db.commit()
+    db.refresh(db_location)
+    return db_location
+
+
+def update_donation_location(db: Session, location_id: int, location_update: schemas.DonationLocationUpdate, user: models.User):
+    location = db.query(models.DonationLocation).filter(models.DonationLocation.id == location_id).first()
+    if location is None:
+        raise NoResultFound("Location not found")
+    if location.collector_id != user.id:
+        raise PermissionError("Not authorized to update this location")
+
+    if location_update.name is not None:
+        location.name = location_update.name
+    if location_update.location is not None:
+        location.location = location_update.location
+    if location_update.hygiene is not None:
+        location.hygiene = location_update.hygiene
+    if location_update.food is not None:
+        location.food = location_update.food
+    if location_update.clothes is not None:
+        location.clothes = location_update.clothes
+
+    db.commit()
+    db.refresh(location)
+    return location
+
+
+def delete_donation_location(db: Session, location_id: int, user: models.User):
+    location = db.query(models.DonationLocation).filter(models.DonationLocation.id == location_id).first()
+    if location is None:
+        raise NoResultFound("Location not found")
+    if location.collector_id != user.id and not user.is_admin:
+        raise PermissionError("Not authorized to delete this location")
+
+    db.delete(location)
+    db.commit()
+    return {"detail": "Location deleted"}
+
+
+def list_donation_locations(db: Session):
+    return db.query(models.DonationLocation).all()
+
+
+def list_donation_locations_by_state(db: Session, state: str):
+    return db.query(models.DonationLocation).filter(models.DonationLocation.location.ilike(f"%{state}%")).all()
 
 
 def load_cities_csv() -> pd.DataFrame:
@@ -24,7 +120,7 @@ def get_city_coordinates(city_name: str) -> Tuple[Optional[float], Optional[floa
 def get_cities_rio_grande_do_sul() -> List[dict]:
     """Obtém uma lista de dicionários contendo os nomes e coordenadas das cidades do Rio Grande do Sul."""
     df: pd.DataFrame = load_cities_csv()
-    return [{"city": row['city'], "lat": row['lat'], "lon": row['lng']} for index, row in df.iterrows()]
+    return [{"city": row['city'], "lat": row['lat'], "lon": row['lng']} for _, row in df.iterrows()]
 
 
 async def fetch_weather_data(session: aiohttp.ClientSession, lat: float, lon: float) -> Optional[dict]:
@@ -135,19 +231,14 @@ def assess_risk(stats: dict) -> Tuple[str, List[str]]:
 
 
 async def get_statistics_for_all_cities() -> List[dict]:
-    """Obtém estatísticas meteorológicas
-    para todas as cidades do Rio Grande do Sul."""
+    """Obtém estatísticas meteorológicas para todas as cidades do Rio Grande do Sul."""
     cities = get_cities_rio_grande_do_sul()
     async with aiohttp.ClientSession() as session:
-        tasks = [asyncio.create_task(
-            fetch_city_statistics(session, city))
-                  for city in cities]
+        tasks = [asyncio.create_task(fetch_city_statistics(session, city)) for city in cities]
         return await asyncio.gather(*tasks)
 
 
-async def fetch_city_statistics(
-        session: aiohttp.ClientSession, city: dict
-        ) -> dict:
+async def fetch_city_statistics(session: aiohttp.ClientSession, city: dict) -> dict:
     """Obtém as estatísticas meteorológicas de uma cidade."""
     lat, lon = city["lat"], city["lon"]
     weather_data = await fetch_weather_data(session, lat, lon)
@@ -167,15 +258,6 @@ def filter_cities(cities: List[dict], criteria: dict) -> List[dict]:
     filtered = []
     for city in cities:
         stats = city.get("stats", {})
-        if all(
-            stats.get(k) is not None and stats.get(k) >= v
-            for k, v in criteria.items()
-        ):
+        if all(stats.get(k) is not None and stats.get(k) >= v for k, v in criteria.items()):
             filtered.append(city)
     return filtered
-
-
-async def main() -> None:
-    """Executa a função principal de forma assíncrona."""
-    cities_stats = await get_statistics_for_all_cities()
-

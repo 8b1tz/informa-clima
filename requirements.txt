@@ -7,3 +7,8 @@ aiohttp
 python-dotenv
 numpy
 fastapi-cors
+bcrypt
+sqlalchemy
+python-jose[cryptography]
+python-multipart
+passlib[bcrypt]
